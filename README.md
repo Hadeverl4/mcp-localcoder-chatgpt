@@ -49,29 +49,36 @@ Built for **[ChatGPT Developer Mode](https://platform.openai.com/docs/guides/dev
 
 **Requirements:** [Node.js](https://nodejs.org) 18+, npm, Git (optional, for git tools)
 
+**Windows**
+
 ```powershell
 git clone https://github.com/hoangcoderr/chatgpt-local-coder.git
 cd chatgpt-local-coder
-copy .env.example .env          # edit WORKSPACE_PATH
+copy .env.example .env          # edit WORKSPACE_PATH + MCP_TOKEN
 npm install
 npm run build
 .\start.ps1
 ```
 
-Server runs at `http://localhost:3000` — health check: `http://localhost:3000/health`
-
-<details>
-<summary><b>macOS / Linux</b></summary>
+**macOS / Linux**
 
 ```bash
 git clone https://github.com/hoangcoderr/chatgpt-local-coder.git
 cd chatgpt-local-coder
 cp .env.example .env
 npm install && npm run build
+
+# Set your project root and an auth token
+node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"   # paste into MCP_TOKEN
+
 npm start
 ```
 
-</details>
+> The `.ps1` scripts are **Windows-only**. On macOS/Linux use `npm start` and the shell tunnel commands below — everything else is cross-platform.
+
+Server runs at `http://127.0.0.1:3000` — health check: `http://127.0.0.1:3000/health`
+
+Set `WORKSPACE_PATH` to your project root (absolute path). With `MCP_TOKEN` set, the MCP endpoint becomes `/mcp/<token>` — that full path is what goes in the connector.
 
 ## 🔌 Connect ChatGPT
 
@@ -82,7 +89,7 @@ npm start
 
 ### 2. Expose your server (pick one tunnel)
 
-See [Tunnel options](#-tunnel-options) below. You need a **public HTTPS** URL pointing to `http://localhost:3000/mcp`.
+See [Tunnel options](#-tunnel-options) below. You need a **public HTTPS** URL pointing to your local server on port 3000.
 
 ### 3. Create a connector
 
@@ -93,20 +100,33 @@ See [Tunnel options](#-tunnel-options) below. You need a **public HTTPS** URL po
 |-------|-------|
 | **Name** | `Local Coder` |
 | **Description** | `Local coding agent. First call agent_status + project_context. Use glob/grep to explore, apply_patch to edit, run_command for shell.` |
-| **URL** | Your tunnel HTTPS URL (e.g. `https://…` or OpenAI Tunnel ID) |
-| **Authentication** | None |
+| **URL** | `https://<your-tunnel>/mcp/<MCP_TOKEN>` — see below |
+| **Authentication** | None (the token is already in the URL) |
 
 3. **Create** → verify tools appear in the list
 
-### 4. Use in chat
+**The URL must include your `MCP_TOKEN`.** With `MCP_TOKEN=abc123`, the connector URL is `https://<your-tunnel>/mcp/abc123`. Plain `/mcp` returns **404** by design, so a URL without the token fails. Leave `MCP_TOKEN` empty to disable auth and use plain `/mcp` — not recommended, since anyone who learns the tunnel URL gets a shell on your machine.
 
-1. **New chat** → **+** → **More** → select **Local Coder**
-2. Example prompts:
-   - *"Read package.json and explain the dependencies"*
-   - *"Run npm test and fix any failures"*
-   - *"Find all TODO comments with grep and summarize"*
+> Treat the connector URL like a password: it contains the token.
 
-> **Tip:** After server updates or restarts → **Refresh** the connector and start a **new chat**.  
+### 4. Use in chat — **must tag the connector**
+
+Every message that should use local tools **must include the connector**. If you skip this, ChatGPT only uses built-in tools, may show *"Looking for available tools"* / *"Đang tìm các công cụ có sẵn"*, then **"Error in message stream"** / **"Lỗi trong luồng tin nhắn"** — with **no error in server logs** (the MCP server was never called).
+
+**How to tag (pick one):**
+
+1. **Before sending:** **New chat** → **+** (tools) → **More** → enable **Local Coder** (connector stays on for that chat).
+2. **In the message:** type **`@`** and choose **Local Coder** (or your connector name) so it appears as a pill/chip above the input.
+
+Then send your prompt. You should see tool permission prompts or MCP activity — not a dead stream with no server log.
+
+Example prompts (after tagging):
+
+- *"Read package.json and explain the dependencies"*
+- *"Run npm test and fix any failures"*
+- *"Find all TODO comments with grep and summarize"*
+
+> **Tip:** After server updates or restarts → **Refresh** the connector and start a **new chat** (re-tag the connector).  
 > **Avoid** clicking **"Always allow"** on permission popups — it can reset the MCP session. Configure permissions in **Settings → Apps** instead.
 
 ## 🌐 Tunnel options
@@ -120,29 +140,61 @@ Stable tunnel ID — connector URL never changes.
 .\start.ps1 -Force
 
 # Terminal 2 — first time only
-.\openai-tunnel-init.bat    # enter tunnel_id + Runtime API key from OpenAI Platform
+.\openai-tunnel.ps1 -Init    # enter tunnel_id + Runtime API key from OpenAI Platform
 
 # Every time after
-.\openai-tunnel.bat
+.\openai-tunnel.ps1
 ```
 
 Get credentials: [OpenAI Platform → Tunnels](https://platform.openai.com/settings/organization/tunnels)
 
 In ChatGPT Connectors: **Connection type → Tunnel** → paste your `tunnel_…` ID.
 
+> **macOS / Linux:** `openai-tunnel.ps1` is PowerShell and downloads the **Windows** build, so it does not work here. Grab the matching `tunnel-client` binary from [openai/tunnel-client releases](https://github.com/openai/tunnel-client/releases) and run it directly, or use one of the options below.
+
 ### Option B — Cloudflare Quick Tunnel
 
 Free, but URL changes on every restart (update connector each time).
 
 ```powershell
-# Terminal 1
-.\start.bat
-
+# Windows — Terminal 1
+.\start.ps1
 # Terminal 2
-.\tunnel.bat    # copy https://….trycloudflare.com into connector URL
+.\tunnel.ps1    # copy https://….trycloudflare.com into connector URL
 ```
 
-Install cloudflared: `winget install Cloudflare.cloudflared`
+```bash
+# macOS / Linux — Terminal 1
+npm start
+# Terminal 2
+npm run tunnel  # cloudflared tunnel --url http://localhost:3000
+```
+
+Install cloudflared: `winget install Cloudflare.cloudflared` (Windows) · `brew install cloudflared` (macOS)
+
+**Requires outbound port 7844** (TCP *and* UDP) to `*.argotunnel.com`. Many corporate/school/hotel networks block it, and `--protocol http2` does **not** help — it still uses 7844. Check with:
+
+```bash
+cloudflared tunnel --url http://localhost:3000 2>&1 | grep -E 'precheck|Registered'
+```
+
+If you see `TCP Connectivity … status=fail` and never `Registered tunnel connection`, the network is blocking it — use Option C.
+
+### Option C — Pinggy *(works when Cloudflare is blocked)*
+
+Pure SSH over port **443**, so it survives networks that block 7844. No install, no signup.
+
+```bash
+# Terminal 1
+npm start
+
+# Terminal 2
+ssh -p 443 -R0:localhost:3000 a.pinggy.io
+```
+
+It prints two HTTPS URLs (`https://….free.pinggy.net` and `https://….run.pinggy-free.link`) — pick either and append `/mcp/<MCP_TOKEN>` for the connector.
+
+Free sessions expire after **60 minutes** and the URL changes each time, so you re-paste the connector URL. A paid plan gives persistent URLs.
 
 ## 🧰 Tools
 
@@ -211,10 +263,13 @@ Copy `.env.example` → `.env`:
 
 ```env
 PORT=3000
-WORKSPACE_PATH=C:\Users\You\projects\my-app
+HOST=127.0.0.1
+MCP_TOKEN=                      # generate one — see below
+WORKSPACE_PATH=C:\Users\You\projects\my-app     # macOS: /Users/you/projects/my-app
 CHATGPT_AUTO_APPROVE=true
 SHELL_TIMEOUT=120
 MCP_SESSION_RECOVERY=true
+ADMIN_PORT=3011
 
 # OpenAI Secure Tunnel (optional)
 OPENAI_TUNNEL_ID=
@@ -223,13 +278,43 @@ OPENAI_TUNNEL_API_KEY=
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WORKSPACE_PATH` | `cwd` | Default directory for relative paths and shell |
+| `WORKSPACE_PATH` | `cwd` | **Your project root** (like `cd` before `claude`). Auto-loads `CLAUDE.md` / `AGENTS.md` into MCP instructions |
+| `HOST` | `127.0.0.1` | Bind address. Keep as-is — `0.0.0.0` exposes the shell to your whole LAN |
+| `MCP_TOKEN` | *(empty)* | Secret in the endpoint path: `/mcp/<token>`. Empty = **no auth**. Generate: `node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"` |
+| `ADMIN_PORT` | `3001` | [Admin UI](#-admin-ui) port (localhost-only, always on). Change it if something else uses 3001 — Docker Desktop often does |
+| `ADMIN_TOKEN` | *(empty)* | Bearer token for the Admin UI. Empty = loopback check only |
 | `CHATGPT_AUTO_APPROVE` | `true` | Tool annotations to reduce ChatGPT popups |
 | `MCP_SESSION_RECOVERY` | `true` | Auto-recover stale sessions after restart |
 | `SHELL_TIMEOUT` | `120` | Max seconds for `run_command` |
 | `FULL_DISK_ACCESS` | `true` | Access any path on the machine |
 
+> Variables already set in your shell **win over `.env`** (`dotenv` does not override). If a change to `.env` seems ignored, check `env | grep WORKSPACE_PATH` first.
+
 > **Full machine access** is enabled by default. `WORKSPACE_PATH` only sets the default cwd — absolute paths like `D:\Projects\…` work everywhere.
+
+## 🖥️ Admin UI
+
+A local web console ships with the server. It starts **automatically** with `npm start` (same process, separate port) — there is no separate command and no on/off switch.
+
+```
+http://127.0.0.1:3001/ui          # or your ADMIN_PORT
+```
+
+The exact URL is printed in the startup banner. Stopping the server stops the admin UI too (`Ctrl+C`, `.\stop.ps1`, or `pkill -f "dist/index.js"`).
+
+| Tab | What it does |
+|-----|--------------|
+| **Tổng quan** | PID, active ChatGPT sessions, default cwd, upstream health |
+| **MCP Servers** | Enable/disable upstream MCP servers, test connections, inspect their tools |
+| **Import** | Pull existing MCP config from Cursor / Claude Code / OpenCode |
+| **Nhật ký** | Live tool-call log from ChatGPT (SSE stream) |
+| **Project** | Preview the exact MCP instructions injected into ChatGPT each session |
+| **Cài đặt** | Read **and write** `.env` |
+| **Raw status** | Raw JSON status dump |
+
+This is the **hub** side of the project: upstream MCP servers are proxied through this one connector, so ChatGPT reaches their tools without being wired up separately. Configure them in `MCP_UPSTREAM_CONFIG` (default `profiles/mcp-upstream.json`).
+
+> ⚠️ **Never expose this port through a tunnel** — only tunnel port 3000. The admin API writes `.env`, so reaching it means being able to change `WORKSPACE_PATH` or switch `MCP_TOKEN` off. It is protected by a loopback-only guard plus the optional `ADMIN_TOKEN`; since it cannot be disabled, setting `ADMIN_TOKEN` is worthwhile.
 
 ## 🏗️ Architecture
 
@@ -248,7 +333,7 @@ src/
     └── context.ts           # agent_status, project_context
 ```
 
-- **Transport:** MCP Streamable HTTP (`/mcp` and `/`)
+- **Transport:** MCP Streamable HTTP — `/mcp/<MCP_TOKEN>` and `/<MCP_TOKEN>` (or `/mcp` and `/` when `MCP_TOKEN` is empty)
 - **Session:** Stateful with auto-recovery when ChatGPT holds a stale session ID
 - **Output:** Structured JSON from every tool
 
@@ -265,6 +350,11 @@ node scripts/test-mcp-session.mjs   # integration test (server must be running)
 
 This server grants **full access to your machine** — files, shell, git. Only expose it through a tunnel you control. Never share your connector URL or tunnel API keys.
 
+- Binds `127.0.0.1` only (`HOST`) — not reachable from your LAN. The tunnel connects to localhost, so it still works
+- `MCP_TOKEN` guards the endpoint at `/mcp/<token>`; `/mcp` and `/` return 404. **Set it** — without it, anyone who learns your tunnel URL gets a shell
+- The connector URL contains the token — treat it as a credential, and stop the tunnel when you are done
+- `WORKSPACE_PATH` only sets the *default* cwd; it does **not** restrict access (`FULL_DISK_ACCESS` is on)
+- The [Admin UI](#-admin-ui) is always running and can write `.env` — tunnel **only** port 3000, never `ADMIN_PORT`, and set `ADMIN_TOKEN`
 - `.env` and secrets are gitignored
 - Audit log: `.mcp-audit.log` (optional, configurable)
 - Use on a trusted network / personal machine only
@@ -273,12 +363,20 @@ This server grants **full access to your machine** — files, shell, git. Only e
 
 | Problem | Fix |
 |---------|-----|
+| **"Error in message stream"** / **"Lỗi trong luồng tin nhắn"** right after *"Looking for tools"* — **no server log** | You did **not tag the connector**. New chat → **+** → **More** → enable connector, or type **`@Local Coder`** in the message. Then retry. |
 | **Resource not found** on tool call | Refresh connector + new chat. Server auto-recovers sessions — ensure latest build is running. |
 | **Connection failed** | Check `.\start.ps1` + tunnel are both running. URL must be HTTPS. |
 | **Permission popup every call** | Settings → Apps → set connector to *Ask before important changes*. Don't use popup "Always allow". |
 | **Tool blocked by OpenAI safety** | Not a server bug. Retry with `run_command` (response may include `run_command_fallback`). Affects `git_push`, `git_checkout`, `delete_directory` occasionally. |
 | **`stream canceled`** in tunnel log | Server/tunnel restarted mid-session → refresh connector, new chat. |
-| **Tunnel URL keeps changing** | Switch to OpenAI Secure Tunnel (`openai-tunnel.bat`). |
+| **Tunnel URL keeps changing** | Switch to OpenAI Secure Tunnel (`openai-tunnel.ps1`). |
+| **Connector stuck "loading" forever when you click Create** | Make sure you are on the latest build (`npm run build`) — older builds deadlocked on the SSE stream and never answered `tools/list`. Also confirm the URL includes `/mcp/<MCP_TOKEN>`. |
+| **404 on the connector URL** | You omitted the token. Use `https://<tunnel>/mcp/<MCP_TOKEN>`, not `/mcp`. |
+| **cloudflared never prints "Registered tunnel connection"** | Network blocks port 7844. `--protocol http2` will not help (same port). Use Pinggy — Option C. |
+| **`EADDRINUSE` on 3001 at startup** | Something else owns the admin port (often Docker Desktop). Set `ADMIN_PORT=3011`. |
+| **`.env` changes seem ignored** | A shell variable of the same name overrides it. Check `env \| grep WORKSPACE_PATH`. |
+| **`npm test` fails with `spawn bash ENOENT`** | Stale `.mcp-state` from a previous run. `rm -rf .mcp-state` and re-run. |
+| **`.ps1` scripts do nothing on macOS** | They are Windows-only. Use `npm start` and the Option B/C shell commands. |
 | **Access denied** | Wrong path or OS permissions on that file. |
 | **git not found** | Install [Git](https://git-scm.com). |
 
@@ -311,11 +409,36 @@ cd chatgpt-local-coder
 copy .env.example .env
 npm install && npm run build
 .\start.ps1                    # terminal 1
-.\openai-tunnel.bat            # terminal 2 (tunnel cố định)
+.\openai-tunnel.ps1            # terminal 2 (tunnel cố định)
 ```
 
-**ChatGPT:** Settings → Connectors → tạo connector → chọn tunnel → Refresh → chat mới.
+**macOS / Linux** — các script `.ps1` chỉ chạy trên Windows:
 
-**Lưu ý:** Không bấm **"Luôn cho phép"** trên popup — cấu hình quyền ở Settings → Apps. Sau khi restart server: Refresh connector + mở chat mới.
+```bash
+git clone https://github.com/hoangcoderr/chatgpt-local-coder.git
+cd chatgpt-local-coder
+cp .env.example .env
+npm install && npm run build
+
+# Tạo token rồi dán vào MCP_TOKEN trong .env
+node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
+
+npm start                                    # terminal 1
+ssh -p 443 -R0:localhost:3000 a.pinggy.io    # terminal 2
+```
+
+Dùng Pinggy nếu mạng chặn cloudflared (cổng 7844). Nếu cloudflared chạy được thì `npm run tunnel` cũng ổn.
+
+**ChatGPT:** Settings → Connectors → tạo connector → Refresh → chat mới.
+
+**URL connector phải có token:** `https://<tunnel>/mcp/<MCP_TOKEN>`. Vào `/mcp` trơn sẽ trả **404**. Coi URL này như mật khẩu — ai có nó là có shell trên máy bạn.
+
+**Bắt buộc tag connector mỗi chat:** Chat mới → **+** → **More** → bật connector, hoặc gõ **`@`** + tên connector trong ô chat. Nếu không tag, ChatGPT báo *"Đang tìm các công cụ có sẵn"* rồi *"Lỗi trong luồng tin nhắn"* — **server không có log lỗi** vì MCP chưa được gọi.
+
+**WORKSPACE_PATH:** đặt đúng thư mục project (không phải thư mục `chatgpt-local-coder`). Server tự đọc `CLAUDE.md` / `AGENTS.md` giống Claude Code.
+
+**Admin UI:** tự bật cùng `npm start` tại `http://127.0.0.1:<ADMIN_PORT>/ui` (mặc định 3001), không tắt riêng được. Dùng để quản lý MCP server khác, xem log tool call, sửa `.env`. **Đừng tunnel cổng này ra ngoài** — chỉ tunnel :3000.
+
+**Lưu ý:** Không bấm **"Luôn cho phép"** trên popup — cấu hình quyền ở Settings → Apps. Sau khi restart server: Refresh connector + mở chat mới + tag lại connector.
 
 Chi tiết cho AI agent: [AGENTS.md](AGENTS.md)

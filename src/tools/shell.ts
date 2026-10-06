@@ -7,10 +7,12 @@ import { audit } from "../lib/audit.js";
 import { toolAnnotations } from "../lib/tool-annotations.js";
 import { toolResult } from "../lib/tool-result.js";
 import {
+  bootstrapShellSession,
   execInShellSession,
   getShellStatus,
-  initShellSession,
   resetShellSession,
+  getWinShell,
+  transpileCompoundOperators,
 } from "../lib/persistent-shell.js";
 
 interface ManagedProcess {
@@ -38,14 +40,14 @@ function appendLog(lines: string[], data: Buffer): void {
 }
 
 export function registerShellTools(server: McpServer, defaultCwd: string, timeoutSec: number): void {
-  initShellSession(defaultCwd);
+  void bootstrapShellSession(defaultCwd);
 
   server.registerTool(
     "run_command",
     {
       title: "Run Command",
       description:
-        "Execute shell in a persistent session (Claude Bash-style). cd/Set-Location persists across calls. Use start_process for long-running servers.",
+        "Run shell commands to verify work (tests, build, lint). Cwd persists across ChatGPT tool calls (saved to disk). Use shell_status to check cwd. Use start_process for long jobs.",
       inputSchema: {
         command: z.string(),
         working_directory: z.string().optional().describe("One-off override; does not reset persistent cwd unless you use shell_reset"),
@@ -114,9 +116,30 @@ export function registerShellTools(server: McpServer, defaultCwd: string, timeou
     async ({ command, working_directory }) => {
       requireCommandAllowed(command);
       const cwd = working_directory ? await validatePath(working_directory) : getShellStatus().cwd || defaultCwd;
-      const shell = process.platform === "win32" ? "powershell.exe" : "bash";
-      const args = process.platform === "win32" ? ["-NoProfile", "-Command", command] : ["-lc", command];
-      const child = spawn(shell, args, { cwd, windowsHide: true, env: process.env });
+      let shell = "bash";
+      let effectiveCommand = command;
+      let args = ["-lc", effectiveCommand];
+
+      if (process.platform === "win32") {
+        const winShellInfo = getWinShell();
+        shell = winShellInfo.shell;
+        if (!winShellInfo.isPwsh) {
+          effectiveCommand = transpileCompoundOperators(command);
+        }
+        args = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", effectiveCommand];
+      }
+
+      const child = spawn(shell, args, {
+        cwd,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          CI: "true",
+          PAGER: "cat",
+          GIT_PAGER: "cat",
+          NO_COLOR: "1",
+        },
+      });
       const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       const item: ManagedProcess = {
         id,
