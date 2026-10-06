@@ -2,7 +2,8 @@
 param(
     [string]$Workspace = $env:WORKSPACE_PATH,
     [int]$Port = 3000,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$OpenUI
 )
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -57,8 +58,17 @@ Write-Host "=== Codex MCP Server ===" -ForegroundColor Cyan
 Write-Host "Default cwd: $Workspace"
 Write-Host "Full machine access: ON"
 if ($ChatGptAutoApprove) { Write-Host "ChatGPT auto-approve: $ChatGptAutoApprove" }
+$AdminPort = Get-DotEnvValue "ADMIN_PORT"
+if (-not $AdminPort) { $AdminPort = "3001" }
+$env:ADMIN_PORT = $AdminPort
+
 Write-Host "Port: $Port"
+Write-Host "Admin UI: http://127.0.0.1:$AdminPort/ui"
 Write-Host ""
+
+if ($env:OPEN_UI -eq "1" -or $OpenUI) {
+    Start-Process "http://127.0.0.1:$AdminPort/ui"
+}
 
 $existingPid = Get-PortOwnerPid -TargetPort $Port
 if ($existingPid) {
