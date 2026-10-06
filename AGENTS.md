@@ -10,7 +10,7 @@ MCP server local giống Codex: đọc/ghi file, chạy lệnh, git. Dùng với
 ## Quyền truy cập
 
 - **Full machine access** — không giới hạn path, không chặn lệnh
-- Dùng absolute path bất kỳ: `C:\`, `D:\Projects\...`, v.v.
+- Dùng absolute path bất kỳ: `C:\`, `D:\Projects\...` (Windows) · `/Users/you/projects/...` (macOS) · `/home/you/...` (Linux)
 - `WORKSPACE_PATH` chỉ là thư mục mặc định cho path tương đối và shell/git
 - `CHATGPT_AUTO_APPROVE=true` — giảm popup xác nhận trên ChatGPT
 
@@ -34,13 +34,28 @@ Thay vào đó:
 ### Lỗi tunnel `stream canceled by remote`
 
 Bình thường khi:
-- Server restart (`stop.ps1` / `start.ps1`) trong lúc ChatGPT đang kết nối
+- Server restart (`stop.ps1` / `start.ps1`, hoặc Ctrl+C `npm start`) trong lúc ChatGPT đang kết nối
 - ChatGPT đóng stream SSE sau khi đổi quyền
-- Tunnel URL đổi (chạy lại `tunnel.bat` cloudflared) mà chưa update Connector URL
+- Tunnel URL đổi (chạy lại `tunnel.ps1` cloudflared) mà chưa update Connector URL
 
 **Fix:** Giữ server + tunnel chạy ổn định, không restart giữa chừng. Nếu restart → Refresh connector + chat mới.
 
-**Khuyến nghị:** Dùng `openai-tunnel.bat` (OpenAI Secure MCP Tunnel) — `tunnel_id` cố định, không cần đổi URL connector mỗi lần.
+**Khuyến nghị:** Dùng OpenAI Secure MCP Tunnel — `tunnel_id` cố định, không cần đổi URL connector mỗi lần. Trên Windows: `openai-tunnel.ps1`. Trên macOS/Linux script này không chạy (PowerShell + bản Windows), phải tự tải binary từ [openai/tunnel-client](https://github.com/openai/tunnel-client/releases).
+
+## Tool profile — `slim` (mặc định) vs `full`
+
+`CHATGPT_TOOL_PROFILE` trong `.env` quyết định agent thấy bao nhiêu tool:
+
+| Profile | Số tool | Dùng khi |
+|---|---|---|
+| `slim` *(mặc định)* | **23** | ChatGPT web — payload `tools/list` nhỏ, ít lỗi discovery |
+| `full` | **47** | MCP client khác, hoặc khi cần nhóm tool bên dưới |
+
+**Chỉ có ở `full`** — gọi các tool này ở `slim` sẽ báo *tool not found*:
+
+`delete_file` · `delete_directory` · `move_file` · `replace_regex` · `list_allowed_directories` · `mcp_tools` · `mcp_call` · `git_log` · `git_branch` · `git_stash` · `git_reset` · `git_pull` · `git_push` · `git_checkout`
+
+Ở `slim`, thay thế bằng `run_command` (`git log`, `git push`, `rm`, `mv`, …). Gọi `agent_status` để biết profile đang chạy.
 
 ## Mapping Claude Code ↔ Codex MCP
 
@@ -55,6 +70,10 @@ Bình thường khi:
 | `LS` | `list_directory` | Có `ignore` globs |
 | `Bash` | `run_command` | Lệnh ngắn, chờ xong |
 | Background shell | `start_process` + `process_output` | |
+| `Rewind` | `rewind` | `list` / `preview` / `restore` — undo file edits qua checkpoint tự động |
+| — | `<server>__<tool>` | MCP upstream đang `enabled` được expose trực tiếp, ví dụ `chrome-devtools__list_pages`, `linear__get_user` |
+| — | `mcp_servers`, `mcp_tools`, `mcp_call` | Diagnostic/fallback cho MCP upstream. `mcp_tools`/`mcp_call` chỉ có ở `full` |
+| — | Admin UI `:<ADMIN_PORT>/ui` | Import MCP từ Cursor / Claude Code / OpenCode (mặc định 3001) |
 | — | `apply_patch` | Codex/OpenAI style (thêm so với Claude) |
 | — | `git_*`, `git_restore` | Git tools riêng (Claude dùng Bash) |
 | — | `project_context` | Đọc AGENTS.md / CLAUDE.md |
@@ -71,14 +90,15 @@ Bình thường khi:
 | Liệt kê thư mục | `list_directory` |
 | Sửa bằng diff/patch | `apply_patch` (ưu tiên) |
 | Sửa nhiều đoạn | `multi_edit` |
-| Sửa bằng regex | `replace_regex` |
+| Sửa bằng regex | `replace_regex` *(full)* |
 | Tạo file mới | `write_file` |
-| Xóa / đổi tên | `delete_file`, `move_file` |
+| Xóa / đổi tên | `delete_file`, `move_file` *(full)* — ở `slim` dùng `run_command` |
 | Chạy lệnh ngắn | `run_command` |
 | Build/test dài | `start_process` → `process_output` |
 | Git | `git_status`, `git_diff`, `git_commit`, `git_restore` |
 | Restore file từ commit | `git_restore` (không dùng `git_checkout` cho file) |
-| Switch branch | `git_checkout` (chỉ branch) hoặc `git_branch` action `switch` |
+| Undo edits trong session | `rewind` action `list` → `preview` → `restore` (không track bash) |
+| Switch branch | `git_checkout` / `git_branch` *(full)* — ở `slim` dùng `run_command "git switch <branch>"` |
 
 ## ChatGPT safety layer — tool bị chặn ngẫu nhiên
 
@@ -89,11 +109,13 @@ Một số tool wrapper đôi khi bị OpenAI chặn với *"Lệnh gọi công 
 | `git_push` | `git push -u origin <branch>` |
 | `git_checkout` | `git switch <branch>` |
 | `git_restore` | `git restore -- <files>` |
-| `delete_directory` | `Remove-Item -Recurse -Force <path>` (Windows) |
+| `delete_directory` | `Remove-Item -Recurse -Force <path>` (Windows) · `rm -rf <path>` (macOS/Linux) |
 
 Tool response có thể chứa `run_command_fallback` — dùng lệnh đó nếu wrapper bị chặn.
 
-**Ổn định:** `git_status`, `git_diff`, `git_add`, `git_commit`, `git_log`, `git_branch`, `git_stash`, `git_reset`, `git_pull`.
+> Cả 4 tool trong bảng trên đều **chỉ có ở profile `full`**. Ở `slim` (mặc định) chúng không tồn tại — dùng thẳng `run_command`.
+
+**Ổn định:** `git_status`, `git_diff`, `git_add`, `git_commit` (có ở cả `slim` và `full`) · `git_log`, `git_branch`, `git_stash`, `git_reset`, `git_pull` (chỉ `full`).
 
 ## Format `apply_patch` (Codex-style)
 
@@ -119,25 +141,34 @@ Dùng `dry_run: true` để xem diff trước khi ghi.
 
 ## Đường dẫn file
 
-- Dùng path tuyệt đối: `C:\Users\...\project\src\file.ts`
+- Dùng path tuyệt đối: `C:\Users\...\project\src\file.ts` · `/Users/you/project/src/file.ts`
 - Hoặc relative từ `WORKSPACE_PATH` trong `.env`
-- Gọi `list_allowed_directories` nếu bị "Access denied"
+- Gọi `agent_status` để xem workspace roots (`list_allowed_directories` chỉ có ở profile `full`)
 
 ## Khởi động server
 
+**Windows**
+
 ```powershell
-cd codex-mcp-server
 .\start.ps1 -Force          # Terminal 1: MCP server
-.\openai-tunnel.bat         # Terminal 2: OpenAI tunnel (URL cố định)
+.\openai-tunnel.ps1         # Terminal 2: OpenAI tunnel (URL cố định)
 ```
 
-**Lần đầu:** chạy `.\openai-tunnel-init.bat` → nhập `tunnel_id` + Runtime API key từ [Platform Tunnels](https://platform.openai.com/settings/organization/tunnels).
+**Lần đầu:** chạy `.\openai-tunnel.ps1 -Init` → nhập `tunnel_id` + Runtime API key từ [Platform Tunnels](https://platform.openai.com/settings/organization/tunnels).
 
-**ChatGPT:** [Settings → Connectors](https://chatgpt.com/#settings/Connectors) → chọn tunnel (không cần dán URL thủ công).
+Tunnel cũ (URL đổi mỗi lần): `.\tunnel.ps1` (cloudflared).
 
-Tunnel cũ (URL đổi mỗi lần): `.\tunnel.bat` (cloudflared).
+**macOS / Linux** — các script `.ps1` không chạy trực tiếp:
 
-Health check: `http://localhost:3000/health` | Tunnel UI: `http://127.0.0.1:8080/ui`
+```bash
+npm start                                    # Terminal 1: MCP server
+npm run tunnel                               # Terminal 2: cloudflared
+ssh -p 443 -R0:localhost:3000 a.pinggy.io    # hoặc Pinggy, nếu mạng chặn cổng 7844
+```
+
+**ChatGPT:** [Settings → Connectors](https://chatgpt.com/#settings/Connectors) → URL phải là `https://<tunnel>/mcp/<MCP_TOKEN>`. Vào `/mcp` trơn sẽ trả 404. Coi URL này như mật khẩu.
+
+Health check: `http://127.0.0.1:3000/health` | Admin UI: `http://127.0.0.1:<ADMIN_PORT>/ui` (mặc định 3001)
 
 ## Troubleshooting
 
@@ -145,5 +176,7 @@ Health check: `http://localhost:3000/health` | Tunnel UI: `http://127.0.0.1:8080
 |---|---|
 | Access denied | Kiểm tra path; bật `FULL_DISK_ACCESS=true` |
 | Patch context not found | Đọc file trước; thêm context lines (dòng bắt đầu bằng space) |
-| ChatGPT hỏi quyền mỗi lần | Refresh connector; Always allow; kiểm tra `CHATGPT_AUTO_APPROVE=true` |
-| Connection failed | Chạy `.\start.ps1` + tunnel; URL phải HTTPS |
+| ChatGPT hỏi quyền mỗi lần | Settings → Apps → đặt *Chỉ hỏi trước thay đổi quan trọng*; kiểm tra `CHATGPT_AUTO_APPROVE=true`. **Không** bấm "Luôn cho phép" trên popup (xem mục trên) |
+| Connection failed | Server + tunnel đều phải chạy; URL phải HTTPS và có `/mcp/<MCP_TOKEN>` |
+| Tool not found | Tool đó chỉ có ở profile `full` — xem mục *Tool profile*. Gọi `agent_status` để kiểm tra |
+| Connector loading mãi khi bấm Create | Build cũ bị deadlock SSE stream. Chạy `npm run build` rồi khởi động lại server |
