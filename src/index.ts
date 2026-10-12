@@ -103,11 +103,25 @@ app.use(express.json({ limit: "50mb" }));
 const MCP_PATHS = MCP_TOKEN ? [`/${MCP_TOKEN}`, `/mcp/${MCP_TOKEN}`] : ["/", "/mcp"];
 const MCP_PATHS_SET = new Set(MCP_PATHS);
 
+// Never put bearer credentials (including URL-path tokens) into logs.
+function safeLogPath(requestPath: string): string {
+  if (MCP_PATHS_SET.has(requestPath)) return "/mcp/[redacted]";
+  if (requestPath === "/" || requestPath === "/mcp" || requestPath === "/health") {
+    return requestPath;
+  }
+  return "[other path]";
+}
+
+function redactMcpToken(message: string): string {
+  return MCP_TOKEN ? message.replaceAll(MCP_TOKEN, "[redacted]") : message;
+}
+
 app.use((req, res, next) => {
   const started = Date.now();
   const isMcpRoute = MCP_PATHS_SET.has(req.path);
   res.on("finish", () => {
     const duration = Date.now() - started;
+    const logPath = safeLogPath(req.path);
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
     const sessionInfo = sessionId ? ` session=${String(sessionId).slice(0, 8)}...` : "";
 
@@ -115,7 +129,13 @@ app.use((req, res, next) => {
       const transportError =
         consumeSessionTransportError(sessionId) ||
         (typeof res.locals.mcpError === "string" ? res.locals.mcpError : undefined);
-      logMcpRequest(req.body, sessionId, duration, res.statusCode, transportError);
+      logMcpRequest(
+        req.body,
+        sessionId,
+        duration,
+        res.statusCode,
+        transportError ? redactMcpToken(transportError) : undefined
+      );
       const rpc = req.body as {
         method?: string;
         params?: { name?: string; arguments?: unknown };
@@ -146,17 +166,17 @@ app.use((req, res, next) => {
             : `HTTP ${res.statusCode}`);
       logMcpHttpEvent({
         method: req.method,
-        path: req.path,
+        path: logPath,
         httpStatus: res.statusCode,
         durationMs: duration,
         sessionId,
-        errorMessage: reason,
+        errorMessage: redactMcpToken(reason),
       });
       return;
     }
 
     if (!isMcpRoute) {
-      console.log(`[HTTP] ${req.method} ${req.path} ${res.statusCode} ${duration}ms${sessionInfo}`);
+      console.log(`[HTTP] ${req.method} ${logPath} ${res.statusCode} ${duration}ms${sessionInfo}`);
     }
   });
   next();
@@ -176,14 +196,6 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     name: "codex-mcp-server",
-    workspace: workspaceRoot,
-    defaultCwd: getDefaultCwd(),
-    fullMachineAccess: true,
-    fullDiskAccess: getFullDiskAccess(),
-    activeSessions: sessionManager.count(),
-    sessionRecovery: SESSION_RECOVERY,
-    mcpEndpoints: MCP_PATHS,
-    instructions: summarizeInstructionContext(instructionContext),
   });
 });
 
@@ -323,8 +335,7 @@ const server = app.listen(PORT, HOST, () => {
   console.log("  Codex MCP Server");
   console.log("========================================");
   console.log(`  Local:     http://${HOST}:${PORT}`);
-  console.log(`  MCP:       http://${HOST}:${PORT}${MCP_PATHS[0]}`);
-  console.log(`  MCP alt:   http://${HOST}:${PORT}${MCP_PATHS[1]}`);
+  console.log(`  MCP:       ${MCP_TOKEN ? "authenticated (URL token hidden)" : "authentication disabled"}`);
   console.log(`  Health:    http://${HOST}:${PORT}/health`);
   console.log(`  Admin UI:  http://127.0.0.1:${ADMIN_PORT}/ui`);
   console.log(`  Default cwd: ${workspaceRoot}`);

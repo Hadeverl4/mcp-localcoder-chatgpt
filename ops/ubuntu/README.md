@@ -15,6 +15,34 @@ sudo ~/chatgpt-mcp-relay/enable-tailscale-funnel.sh
 
 The Funnel target remains `http://127.0.0.1:43000`, so the Windows reverse SSH and Owner Guard design does not change.
 
+`verify-tailscale-funnel.sh` now verifies the **real public Funnel path** by resolving the node through HTTPS DNS and forcing curl to the public A record. This avoids the false-positive case where MagicDNS resolves the same hostname directly to the node's `100.x` tailnet address.
+
+### Guarded Funnel watchdog
+
+For the known failure class where local MCP + reverse SSH + Funnel config are healthy but the public TLS edge stops forwarding to the node, install the bounded watchdog:
+
+```bash
+sudo ~/chatgpt-mcp-relay/install-mcp-funnel-watchdog.sh
+```
+
+The watchdog runs every 5 minutes and only considers a `tailscaled` restart after all lower MCP layers are healthy, the expected 443 mapping is intact, genuine public DNS succeeds, and the public health endpoint fails twice. It captures diagnostics, first tries a lower-impact netmap refresh, performs at most one guarded daemon restart, and enforces a one-hour restart cooldown.
+
+Status:
+
+```bash
+sudo cat /var/lib/hyperix-mcp-funnel-watchdog/status.json
+systemctl status hyperix-mcp-funnel-watchdog.timer --no-pager
+sudo journalctl -u hyperix-mcp-funnel-watchdog.service --since=-30min --no-pager
+```
+
+Rollback:
+
+```bash
+sudo ~/chatgpt-mcp-relay/remove-mcp-funnel-watchdog.sh
+```
+
+See `MCP-FUNNEL-INCIDENT-RUNBOOK.md` for the accepted incident signature and recovery logic.
+
 Architecture:
 
 ~~~text

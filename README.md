@@ -89,19 +89,29 @@ ChatGPT Local\
 └─ ...
 ```
 
-After copying the whole `ChatGPT Local` folder to another Windows machine, install Node.js 18+ and run:
+When this repository is used inside the prepared **ChatGPT Local full bundle**, the root launcher now has a machine-aware first-run bootstrap. After copying the whole `ChatGPT Local` folder to another Windows machine, run:
 
 ```powershell
-cd "<new-path>\ChatGPT Local\mcp-localcoder-chatgpt"
+cd "<new-path>\ChatGPT Local"
+.\START-CHATGPT-ALL.bat
+```
+
+On a fresh machine the root bootstrap installs/validates Node.js and Tailscale as needed, runs `npm ci` + build, signs the PC into Tailscale once, creates a **direct Windows Tailscale Funnel** to the localhost MCP, generates fresh MCP/Admin tokens, rewrites `WORKSPACE_PATH`, and copies the protected connector URL to the clipboard only after full-stack verification succeeds. Subsequent starts reuse the machine's stable Funnel URL and do not rotate tokens.
+
+The machine enrollment marker is stored outside the copied source under `%LOCALAPPDATA%\ChatGPTLocalCoderLauncher\portable-bootstrap.json`, so copying the folder does not copy the old PC's enrollment identity. If a `.env` from another PC is present, fresh-machine bootstrap rotates those copied secrets only after external prerequisites are ready and removes its transaction backup after success.
+
+Each portable PC gets its own Tailscale device hostname and tokens, so portable PCs do not share the Home Server reverse-SSH port `43000`. The original Home Server machine remains on `PUBLIC_TUNNEL_MODE=tailscale`; portable PCs use `PUBLIC_TUNNEL_MODE=tailscale-local`.
+
+See the bundle-level `PORTABLE-FIRST-RUN.md` for the complete workflow and recovery behavior.
+
+If you clone/use **this repository by itself** without the root ChatGPT Local wrapper, the original setup remains supported:
+
+```powershell
 .\portable-setup.ps1
 .\start.ps1
 ```
 
-`portable-setup.ps1` automatically rewrites `WORKSPACE_PATH` to the new machine/path, keeps the optimized `fast` profile, runs `npm ci`, rebuilds TypeScript, and preserves existing `.env` secrets if the file was copied. Runtime state, background-process metadata, checkpoints, and audit logs are separated by machine under `.runtime/<computer-name>/`, so stale process state from the old PC is not resumed on the new PC.
-
-`start.ps1` also self-repairs a stale `WORKSPACE_PATH`: if the old absolute path no longer exists, it uses the parent folder of this repository as the workspace. If `node_modules` is missing it automatically runs `npm ci`.
-
-> Security: copying `.env` also copies `MCP_TOKEN`, tunnel IDs/API keys, and other local secrets. Only copy it to a machine you trust. To provision fresh credentials, omit/delete `.env` on the destination before running `portable-setup.ps1`.
+`portable-setup.ps1` rewrites `WORKSPACE_PATH`, keeps the optimized `fast` profile, runs `npm ci`, and rebuilds TypeScript. `start.ps1` also self-repairs a stale `WORKSPACE_PATH` and installs dependencies when needed.
 
 ### Owner Guard (shared-account safety)
 

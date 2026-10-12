@@ -1,0 +1,13 @@
+[Unit]
+Description=Periodically verify the true public MCP Funnel path
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+AccuracySec=15s
+Persistent=true
+Unit=hyperix-mcp-funnel-watchdog.service
+
+[Install]
+WantedBy=timers.target

@@ -56,6 +56,9 @@ body {
 
 .sidebar-foot { padding: 0.75rem 0.5rem 0; border-top: 1px solid var(--border); margin-top: 0.5rem; }
 .conn-dot { font-size: 0.75rem; color: var(--muted); }
+.conn-dot.healthy, .conn-dot.local-only { color: #9ed6aa; }
+.conn-dot.degraded { color: #e2c67a; }
+.conn-dot.down { color: #e1a1a1; }
 
 .content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
@@ -103,6 +106,97 @@ body {
 .stat-value { font-size: 1.35rem; font-weight: 600; margin-top: 0.35rem; font-variant-numeric: tabular-nums; }
 .stat-sub { font-size: 0.75rem; color: var(--faint); margin-top: 0.25rem; word-break: break-all; }
 
+.mcp-live-panel {
+  border-color: #383838;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.mcp-live-panel.healthy { border-color: #285436; box-shadow: inset 0 1px 0 rgba(121, 207, 145, 0.05); }
+.mcp-live-panel.degraded { border-color: #5b4e2d; }
+.mcp-live-panel.local-only { border-color: #3e4e5b; }
+.mcp-live-panel.down { border-color: #5b2d2d; }
+.mcp-live-head { gap: 1rem; }
+.mcp-live-sub { margin-top: 0.3rem; font-size: 0.76rem; }
+.mcp-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 104px;
+  justify-content: center;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+.mcp-live-badge.healthy { background: #122016; border-color: #2d5b39; color: #a9ddb5; }
+.mcp-live-badge.degraded { background: #211d12; border-color: #5b4e2d; color: #e2d2a4; }
+.mcp-live-badge.local-only { background: #121b21; border-color: #38505f; color: #a9c9dc; }
+.mcp-live-badge.down { background: #201313; border-color: #5b2d2d; color: #e4b5b5; }
+.mcp-live-badge.checking { background: var(--surface-2); color: var(--muted); }
+.mcp-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 0 currentColor;
+}
+.mcp-live-badge.healthy .mcp-live-dot {
+  animation: mcp-live-pulse 1.8s ease-out infinite;
+}
+@keyframes mcp-live-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(169, 221, 181, 0.42); }
+  70% { box-shadow: 0 0 0 6px rgba(169, 221, 181, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(169, 221, 181, 0); }
+}
+.mcp-live-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 1rem 1.25rem;
+}
+.mcp-live-summary { min-width: 220px; flex: 1; }
+.mcp-live-title { font-size: 1rem; font-weight: 600; }
+.mcp-live-detail { margin-top: 0.3rem; max-width: 680px; }
+.mcp-live-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(90px, 1fr));
+  gap: 0.5rem;
+}
+.mcp-live-metrics > div {
+  min-width: 92px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+}
+.mcp-live-metrics span {
+  display: block;
+  color: var(--faint);
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.mcp-live-metrics strong {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.8rem;
+  font-family: var(--mono);
+  font-weight: 500;
+}
+.mcp-live-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 1.25rem;
+  border-top: 1px solid var(--border);
+  color: var(--faint);
+  font-size: 0.7rem;
+  font-family: var(--mono);
+}
+
 .owner-guard-panel { border-color: #383838; }
 .owner-guard-head { gap: 1rem; }
 .owner-guard-sub { margin-top: 0.3rem; font-size: 0.76rem; }
@@ -138,6 +232,11 @@ body {
 .owner-guard-options { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 .owner-guard-options label { display: flex; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.76rem; }
 .owner-guard-options input { width: 72px; padding: 0.4rem 0.5rem; }
+
+@media (max-width: 980px) {
+  .mcp-live-body { align-items: stretch; flex-direction: column; }
+  .mcp-live-metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+}
 
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }

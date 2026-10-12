@@ -1,5 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
+import { request as httpsRequest } from "node:https";
+import { isIP, type LookupFunction } from "node:net";
 import { Router, type Request, type Response } from "express";
 import type { McpUpstreamManager } from "../lib/mcp-upstream-manager.js";
 import {
@@ -73,6 +75,201 @@ export function createAdminRouter(manager: McpUpstreamManager, options: {
 }): Router {
   const router = Router();
   const envPath = path.resolve(process.cwd(), ".env");
+  let mcpLiveLastOkAt: string | null = null;
+  let mcpLiveLastFailureAt: string | null = null;
+  let publicDnsCache: { host: string; ips: string[]; expiresAt: number } | null = null;
+
+  async function probeMcpHealth(url: string, timeoutMs = 4000) {
+    const started = performance.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+        cache: "no-store",
+      });
+      const body = await response.json().catch(() => null) as { status?: string; name?: string } | null;
+      const ok =
+        response.ok &&
+        body?.status === "ok" &&
+        body?.name === "codex-mcp-server";
+      return {
+        ok,
+        http_status: response.status,
+        latency_ms: Math.max(0, Math.round(performance.now() - started)),
+        error: ok ? null : "Unexpected MCP health response",
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        http_status: 0,
+        latency_ms: Math.max(0, Math.round(performance.now() - started)),
+        error: err instanceof Error ? err.message : String(err),
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async function resolvePublicIpv4(host: string): Promise<string[]> {
+    if (publicDnsCache?.host === host && publicDnsCache.expiresAt > Date.now()) {
+      return publicDnsCache.ips;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3500);
+    try {
+      const dohUrl = new URL("https://dns.google/resolve");
+      dohUrl.searchParams.set("name", host);
+      dohUrl.searchParams.set("type", "A");
+      const response = await fetch(dohUrl, {
+        headers: { accept: "application/dns-json" },
+        signal: controller.signal,
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(`Public DoH returned HTTP ${response.status}`);
+      const body = await response.json() as {
+        Answer?: Array<{ type?: number; data?: string; TTL?: number }>;
+      };
+      const answers = (body.Answer || []).filter(
+        (answer) => answer.type === 1 && typeof answer.data === "string" && isIP(answer.data) === 4
+      );
+      const ips = [...new Set(answers.map((answer) => answer.data!))];
+      if (!ips.length) throw new Error("Public DoH returned no IPv4 Funnel edge");
+      const ttl = Math.max(30, Math.min(300, ...answers.map((answer) => Number(answer.TTL) || 60)));
+      publicDnsCache = { host, ips, expiresAt: Date.now() + ttl * 1000 };
+      return ips;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  function probeHttpsHealthAtIp(target: URL, ip: string, timeoutMs = 5000): Promise<{
+    ok: boolean;
+    http_status: number;
+    latency_ms: number;
+    error: string | null;
+    ip: string;
+  }> {
+    return new Promise((resolve) => {
+      const started = performance.now();
+      let settled = false;
+      const finish = (value: {
+        ok: boolean;
+        http_status: number;
+        latency_ms: number;
+        error: string | null;
+        ip: string;
+      }) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+
+      const req = httpsRequest({
+        protocol: "https:",
+        hostname: target.hostname,
+        port: target.port ? Number(target.port) : 443,
+        path: `${target.pathname}${target.search}`,
+        method: "GET",
+        servername: target.hostname,
+        headers: {
+          accept: "application/json",
+          host: target.host,
+          "user-agent": "codex-mcp-admin-health/1",
+        },
+        lookup: ((_: string, options, callback) => {
+          if (options.all) {
+            callback(null, [{ address: ip, family: 4 }]);
+          } else {
+            callback(null, ip, 4);
+          }
+        }) satisfies LookupFunction,
+      }, (response) => {
+        let text = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          if (text.length < 16384) text += chunk;
+        });
+        response.on("end", () => {
+          let body: { status?: string; name?: string } | null = null;
+          try {
+            body = JSON.parse(text);
+          } catch {}
+          const ok =
+            response.statusCode === 200 &&
+            body?.status === "ok" &&
+            body?.name === "codex-mcp-server";
+          finish({
+            ok,
+            http_status: response.statusCode || 0,
+            latency_ms: Math.max(0, Math.round(performance.now() - started)),
+            error: ok ? null : "Unexpected public MCP health response",
+            ip,
+          });
+        });
+      });
+
+      req.setTimeout(timeoutMs, () => req.destroy(new Error("Public MCP health timeout")));
+      req.on("error", (err) => {
+        finish({
+          ok: false,
+          http_status: 0,
+          latency_ms: Math.max(0, Math.round(performance.now() - started)),
+          error: err.message,
+          ip,
+        });
+      });
+      req.end();
+    });
+  }
+
+  async function probePublicMcpHealth(publicBase: string) {
+    const target = new URL(`${publicBase}/health`);
+    const isTailscaleFunnel =
+      (process.env.PUBLIC_TUNNEL_MODE || "").trim().toLowerCase() === "tailscale" ||
+      target.hostname.endsWith(".ts.net");
+
+    if (!isTailscaleFunnel || target.protocol !== "https:") {
+      return {
+        ...(await probeMcpHealth(target.toString(), 5000)),
+        probe_mode: "direct",
+        edge_ok: null,
+        edge_total: null,
+      };
+    }
+
+    try {
+      const ips = await resolvePublicIpv4(target.hostname);
+      const probes = await Promise.all(ips.slice(0, 4).map((ip) => probeHttpsHealthAtIp(target, ip)));
+      const edgeOk = probes.filter((probe) => probe.ok).length;
+      const allOk = probes.length > 0 && edgeOk === probes.length;
+      return {
+        ok: allOk,
+        http_status: allOk ? 200 : probes.find((probe) => !probe.ok)?.http_status || 0,
+        latency_ms: probes.length ? Math.max(...probes.map((probe) => probe.latency_ms)) : 0,
+        error: allOk
+          ? null
+          : edgeOk > 0
+            ? `Only ${edgeOk}/${probes.length} public Funnel edges are healthy`
+            : probes[0]?.error || "Public Funnel edge probe failed",
+        probe_mode: "doh_forced_public",
+        edge_ok: edgeOk,
+        edge_total: probes.length,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        http_status: 0,
+        latency_ms: 0,
+        error: err instanceof Error ? err.message : String(err),
+        probe_mode: "doh_forced_public",
+        edge_ok: 0,
+        edge_total: 0,
+      };
+    }
+  }
 
   router.get("/health", async (_req: Request, res: Response) => {
     const upstream = await manager.listStatuses();
@@ -88,6 +285,64 @@ export function createAdminRouter(manager: McpUpstreamManager, options: {
       checkpoint: getCheckpointConfig(),
       instructions: options.instructionSummary?.() ?? null,
       owner_guard: getOwnerGuardStatus(),
+    });
+  });
+
+  router.get("/api/mcp-health", async (_req: Request, res: Response) => {
+    const checkedAt = new Date().toISOString();
+    const localUrl = `http://127.0.0.1:${options.mcpPort}/health`;
+    const publicBase = (process.env.PUBLIC_TUNNEL_BASE_URL || "").trim().replace(/\/+$/, "");
+    let publicHost: string | null = null;
+    if (publicBase) {
+      try {
+        publicHost = new URL(publicBase).host;
+      } catch {}
+    }
+
+    const [local, publicProbe] = await Promise.all([
+      probeMcpHealth(localUrl, 2500),
+      publicBase
+        ? probePublicMcpHealth(publicBase)
+        : Promise.resolve({
+            ok: false,
+            http_status: 0,
+            latency_ms: 0,
+            error: "PUBLIC_TUNNEL_BASE_URL is not configured",
+            probe_mode: "unconfigured",
+            edge_ok: null,
+            edge_total: null,
+          }),
+    ]);
+
+    const publicConfigured = Boolean(publicBase);
+    const overall =
+      !local.ok
+        ? "down"
+        : !publicConfigured
+          ? "local_only"
+          : publicProbe.ok
+            ? "healthy"
+            : "degraded";
+
+    if (overall === "healthy" || overall === "local_only") {
+      mcpLiveLastOkAt = checkedAt;
+    } else {
+      mcpLiveLastFailureAt = checkedAt;
+    }
+
+    res.json({
+      ok: overall === "healthy" || overall === "local_only",
+      status: overall,
+      checked_at: checkedAt,
+      last_ok_at: mcpLiveLastOkAt,
+      last_failure_at: mcpLiveLastFailureAt,
+      active_sessions: options.sessionCount(),
+      local,
+      public: {
+        configured: publicConfigured,
+        host: publicHost,
+        ...publicProbe,
+      },
     });
   });
 

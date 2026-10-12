@@ -54,6 +54,7 @@ console.log("=== Build ===");
 await runBuild();
 
 const unitScripts = [
+  "scripts/test-health-token-redaction.mjs",
   "scripts/test-patch.mjs",
   "scripts/test-tools.mjs",
   "scripts/test-checkpoints.mjs",
@@ -77,6 +78,10 @@ const server = spawn(process.execPath, ["dist/index.js"], {
     PORT: String(mcpPort),
     ADMIN_PORT: String(adminPort),
     CHATGPT_TOOL_PROFILE: "slim",
+    // Keep integration isolated from operator credentials.
+    // Explicit whitespace values prevent dotenv from reloading repo secrets; runtime trims them to empty.
+    MCP_TOKEN: " ",
+    ADMIN_TOKEN: " ",
   },
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -87,8 +92,10 @@ server.stderr?.on("data", (d) => (serverLog += d));
 
 try {
   const health = await waitFor(`http://127.0.0.1:${mcpPort}/health`);
-  if (!health.instructions?.tool_profile) throw new Error("health missing instructions");
-  console.log(`OK  health: profile=${health.instructions.tool_profile}, memory=${health.instructions.memory_files?.length ?? 0} files`);
+  if (JSON.stringify(Object.keys(health).sort()) !== JSON.stringify(["name", "status"])) {
+    throw new Error("public MCP health exposes nonminimal fields");
+  }
+  console.log("OK  public health is minimal");
 
   const admin = await waitFor(`http://127.0.0.1:${adminPort}/health`);
   if (!admin.instructions) throw new Error("admin health missing instructions");

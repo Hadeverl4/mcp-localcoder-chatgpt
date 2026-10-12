@@ -36,6 +36,8 @@ let activityPaused = false;
 let ownerGuardStatus = null;
 let ownerGuardRefreshTimer = null;
 let ownerGuardCountdownTimer = null;
+let mcpHealthRefreshTimer = null;
+let mcpHealthInFlight = false;
 
 function toast(msg, isError = false) {
   const el = document.getElementById("toast");
@@ -137,6 +139,115 @@ async function loadDashboard() {
       <div class="stat-sub">${esc(health.default_cwd)}</div></div>`;
   document.getElementById("dash-servers").innerHTML = serversTable(health.upstream || [], { actions: false });
   document.getElementById("status-json").textContent = JSON.stringify(health, null, 2);
+}
+
+function renderMcpLiveHealth(data, error = null) {
+  const panel = document.getElementById("mcp-live-panel");
+  const badge = document.getElementById("mcp-live-badge");
+  const title = document.getElementById("mcp-live-title");
+  const detail = document.getElementById("mcp-live-detail");
+  const local = document.getElementById("mcp-live-local");
+  const publicRoute = document.getElementById("mcp-live-public");
+  const latency = document.getElementById("mcp-live-latency");
+  const sessions = document.getElementById("mcp-live-sessions");
+  const host = document.getElementById("mcp-live-host");
+  const checked = document.getElementById("mcp-live-checked");
+
+  if (error || !data) {
+    panel.className = "panel mcp-live-panel down";
+    badge.className = "mcp-live-badge down";
+    badge.innerHTML = '<span class="mcp-live-dot"></span>OFFLINE';
+    title.textContent = "Không đọc được MCP health";
+    detail.textContent = error?.message || "Admin API health request failed.";
+    local.textContent = "UNKNOWN";
+    publicRoute.textContent = "UNKNOWN";
+    latency.textContent = "—";
+    sessions.textContent = "—";
+    checked.textContent = "Kiểm tra thất bại";
+    return;
+  }
+
+  const states = {
+    healthy: {
+      badge: "HEALTHY",
+      title: "MCP đang hoạt động tốt",
+      detail: "Local MCP và public Funnel end-to-end đều phản hồi bình thường.",
+      cls: "healthy",
+    },
+    degraded: {
+      badge: "DEGRADED",
+      title: "Public MCP đang có vấn đề",
+      detail: "Local MCP vẫn khỏe nhưng đường public Funnel không phản hồi đúng.",
+      cls: "degraded",
+    },
+    local_only: {
+      badge: "LOCAL",
+      title: "MCP local đang hoạt động",
+      detail: "PUBLIC_TUNNEL_BASE_URL chưa cấu hình nên chưa thể xác minh public route.",
+      cls: "local-only",
+    },
+    down: {
+      badge: "DOWN",
+      title: "MCP local không phản hồi",
+      detail: "Local MCP health check thất bại.",
+      cls: "down",
+    },
+  };
+  const state = states[data.status] || states.down;
+  panel.className = `panel mcp-live-panel ${state.cls}`;
+  badge.className = `mcp-live-badge ${state.cls}`;
+  badge.innerHTML = `<span class="mcp-live-dot"></span>${state.badge}`;
+  title.textContent = state.title;
+  detail.textContent = state.detail;
+  local.textContent = data.local?.ok ? `OK · ${data.local.latency_ms}ms` : "FAIL";
+  publicRoute.textContent = !data.public?.configured
+    ? "N/A"
+    : data.public.edge_total > 1
+      ? `${data.public.edge_ok}/${data.public.edge_total} OK`
+      : data.public.ok
+        ? "OK"
+        : "FAIL";
+  latency.textContent = data.public?.ok ? `${data.public.latency_ms}ms` : "—";
+  sessions.textContent = String(data.active_sessions ?? 0);
+  const probeLabel = data.public?.probe_mode === "doh_forced_public" ? "public edge" : "direct";
+  host.textContent = `Public endpoint: ${data.public?.host || "—"} · ${probeLabel}`;
+  checked.textContent = data.checked_at ? `Cập nhật ${formatTime(data.checked_at)}` : "—";
+
+  const conn = document.getElementById("conn-status");
+  conn.className = `conn-dot ${state.cls}`;
+  conn.textContent = data.status === "healthy"
+    ? `● MCP healthy · ${data.active_sessions ?? 0} sessions`
+    : data.status === "degraded"
+      ? "● MCP public degraded"
+      : data.status === "local_only"
+        ? "● MCP local healthy"
+        : "● MCP unavailable";
+}
+
+async function loadMcpLiveHealth() {
+  if (mcpHealthInFlight) return;
+  mcpHealthInFlight = true;
+  try {
+    const data = await api("/api/mcp-health");
+    renderMcpLiveHealth(data);
+  } catch (err) {
+    renderMcpLiveHealth(null, err);
+  } finally {
+    mcpHealthInFlight = false;
+  }
+}
+
+function startMcpHealthUiTimer() {
+  if (mcpHealthRefreshTimer) return;
+  mcpHealthRefreshTimer = setInterval(() => {
+    const dashboardActive = document.getElementById("dashboard").classList.contains("active");
+    if (document.visibilityState === "visible" && dashboardActive) {
+      loadMcpLiveHealth().catch(() => {});
+    }
+  }, 5000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") loadMcpLiveHealth().catch(() => {});
+  });
 }
 
 function formatDuration(ms) {
@@ -653,13 +764,14 @@ document.getElementById("import-file-btn").addEventListener("click", async () =>
 });
 
 async function refreshAll() {
-  await Promise.all([loadDashboard(), loadServers(), loadImport(), loadEnvForm(), loadProject().catch(() => {})]);
+  await Promise.all([loadDashboard(), loadMcpLiveHealth(), loadServers(), loadImport(), loadEnvForm(), loadProject().catch(() => {})]);
 }
 
 document.getElementById("refresh-all").addEventListener("click", () => refreshAll().catch((e) => toast(e.message, true)));
 
 refreshAll().catch((err) => toast(err.message, true));
 startOwnerGuardUiTimers();
+startMcpHealthUiTimer();
 
 async function openLocalTools() {
   const data = await api("/api/local-tools");

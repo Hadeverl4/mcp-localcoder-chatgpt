@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Codex MCP Admin</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="/ui/styles.css" />
 </head>
 <body>
   <div class="layout">
@@ -39,6 +39,31 @@
       </header>
 
       <section id="dashboard" class="view active">
+        <div class="panel mcp-live-panel" id="mcp-live-panel">
+          <div class="panel-head mcp-live-head">
+            <div>
+              <h2>MCP Live Health</h2>
+              <div class="muted mcp-live-sub">Theo dõi local MCP và đường public end-to-end qua Funnel.</div>
+            </div>
+            <span id="mcp-live-badge" class="mcp-live-badge checking"><span class="mcp-live-dot"></span>CHECKING</span>
+          </div>
+          <div class="mcp-live-body">
+            <div class="mcp-live-summary">
+              <div id="mcp-live-title" class="mcp-live-title">Đang kiểm tra MCP…</div>
+              <div id="mcp-live-detail" class="mcp-live-detail muted">Đợi phản hồi health đầu tiên.</div>
+            </div>
+            <div class="mcp-live-metrics">
+              <div><span>Local MCP</span><strong id="mcp-live-local">—</strong></div>
+              <div><span>Public route</span><strong id="mcp-live-public">—</strong></div>
+              <div><span>End-to-end</span><strong id="mcp-live-latency">—</strong></div>
+              <div><span>Sessions</span><strong id="mcp-live-sessions">—</strong></div>
+            </div>
+          </div>
+          <div class="mcp-live-foot">
+            <span id="mcp-live-host">Public endpoint: —</span>
+            <span id="mcp-live-checked">Chưa kiểm tra</span>
+          </div>
+        </div>
         <div class="stat-grid" id="stat-grid"></div>
         <div class="panel owner-guard-panel" id="owner-guard-panel">
           <div class="panel-head owner-guard-head">
@@ -216,6 +241,6 @@
     </div>
   </dialog>
 
-  <script src="app.js"></script>
+  <script src="/ui/app.js"></script>
 </body>
 </html>
