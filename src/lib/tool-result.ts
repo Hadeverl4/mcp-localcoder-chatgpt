@@ -41,7 +41,7 @@ export function toolResult<T extends object>(
     data: data as Record<string, unknown>,
   };
 
-  const textMode = (process.env.TOOL_RESULT_TEXT_MODE || "summary").trim().toLowerCase();
+  const textMode = (process.env.TOOL_RESULT_TEXT_MODE || "full").trim().toLowerCase();
   const textPayload =
     textMode === "full"
       ? payload
