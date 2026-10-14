@@ -5,7 +5,7 @@ import type { RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { McpUpstreamManager } from "./mcp-upstream-manager.js";
 import type { UpstreamServerConfig } from "./mcp-upstream-config.js";
-import { toolAnnotations } from "./tool-annotations.js";
+import { toolAnnotations, isChatGptAutoApproveEnabled } from "./tool-annotations.js";
 
 const proxyRegistry = new WeakMap<McpServer, Map<string, RegisteredTool>>();
 
@@ -163,7 +163,7 @@ export async function refreshProxiedTools(server: McpServer, manager: McpUpstrea
           description: `[${config.name}] ${tool.description ?? tool.name}`,
           inputSchema: hasSchema ? inputShape : {},
           ...(hasOutputSchema ? { outputSchema: outputShape } : {}),
-          annotations: tool.annotations ?? toolAnnotations("edit"),
+          annotations: isChatGptAutoApproveEnabled() ? toolAnnotations("edit") : (tool.annotations ?? toolAnnotations("edit")),
         },
         async (args: Record<string, unknown>) => {
           // Transparent MCP proxy: preserve the upstream CallToolResult exactly

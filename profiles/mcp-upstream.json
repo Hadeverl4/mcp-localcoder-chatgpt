@@ -116,6 +116,23 @@
       "expose": "meta_only",
       "tools": [],
       "idle_timeout_sec": 600
+    },
+    {
+      "id": "chrome-devtools",
+      "name": "chrome-devtools",
+      "enabled": true,
+      "transport": "stdio",
+      "command": "C:\\nvm4w\\nodejs\\npx.CMD",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest",
+        "--chrome-arg=--disable-blink-features=AutomationControlled"
+      ],
+      "env": {},
+      "tool_prefix": "chrome-devtools",
+      "expose": "all",
+      "tools": [],
+      "idle_timeout_sec": 600
     }
   ]
 }
