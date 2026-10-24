@@ -90,12 +90,23 @@
                 <button type="button" class="btn owner-lock" data-owner-mode="locked">Lock</button>
                 <button type="button" class="btn owner-readonly" data-owner-mode="readonly">Readonly</button>
                 <button type="button" class="btn primary owner-arm" data-owner-mode="armed">Arm</button>
+                <button type="button" class="btn owner-arm-reload" id="owner-arm-reload" title="Gia hạn theo thời lượng Arm gần nhất" disabled>↻ Reload</button>
               </div>
               <div class="owner-guard-options">
                 <label><span>Arm trong</span><input id="owner-arm-minutes" type="number" min="1" max="480" value="60" /><span>phút</span></label>
                 <label><span>Idle tối đa</span><input id="owner-idle-minutes" type="number" min="1" max="240" value="10" /><span>phút</span></label>
               </div>
             </div>
+            <div class="owner-arm-presets" role="group" aria-label="Mốc thời gian Arm nhanh">
+              <span class="muted">Arm nhanh</span>
+              <button type="button" class="btn ghost sm" data-owner-duration="15">15p</button>
+              <button type="button" class="btn ghost sm" data-owner-duration="30">30p</button>
+              <button type="button" class="btn ghost sm" data-owner-duration="60">1h</button>
+              <button type="button" class="btn ghost sm" data-owner-duration="120">2h</button>
+              <button type="button" class="btn ghost sm" data-owner-duration="240">4h</button>
+              <button type="button" class="btn ghost sm" data-owner-duration="480">8h</button>
+            </div>
+            <div class="owner-arm-hint muted">Reload bắt đầu lại thời lượng Arm vừa dùng; các mốc nhanh áp dụng ngay. Idle timeout không thay đổi.</div>
           </div>
         </div>
         <div class="panel">

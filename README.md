@@ -138,7 +138,7 @@ You can also control Owner Guard from the local Admin UI:
 http://127.0.0.1:<ADMIN_PORT>/ui/
 ```
 
-The **Tổng quan** dashboard shows the effective mode, TTL countdown, current local idle time, Windows lock state, and buttons for **Lock / Readonly / Arm**. The Arm action asks for confirmation and uses the TTL/idle values shown in the panel.
+The **Tổng quan** dashboard shows the effective mode, TTL countdown, current local idle time, Windows lock state, and buttons for **Lock / Readonly / Arm / Reload**. Use the one-click Arm presets (15/30 minutes or 1/2/4/8 hours), or enter a custom TTL. Reload renews the last armed duration from the current time. Elevating from Locked/Readonly still requires confirmation, and the local idle and Windows lock protections stay active.
 
 The Admin UI remains loopback-only. If `ADMIN_TOKEN` is configured, the static UI can still load locally but API calls remain token-protected; the browser asks for the token when needed and keeps it only in that tab's `sessionStorage` (not in source code or `localStorage`). Never tunnel `ADMIN_PORT` to the Internet.
 
@@ -153,7 +153,7 @@ Cloudflare Named Tunnel on Ubuntu
   -> Windows MCP http://127.0.0.1:3000
 ```
 
-Versioned deployment files live in `ops/ubuntu` and `ops/windows`. The reverse SSH link is intentionally manual and forwards only MCP port 3000; Admin UI port 3011 is never forwarded.
+Versioned deployment files live in `ops/ubuntu` and `ops/windows`. The optional root bundle launcher starts the reverse SSH link as part of its one-click startup; the standalone `ops/windows` scripts can also be run manually. The link forwards only MCP port 3000; Admin UI port 3011 is never forwarded.
 
 On Ubuntu, stage/install `cloudflared` as a system service with:
 

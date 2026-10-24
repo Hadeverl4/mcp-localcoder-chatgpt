@@ -1,5 +1,7 @@
 param(
     [string]$HostAlias = 'mcp-relay',
+    [string]$HomeLanHost = '',
+    [string]$HomeLanPrefix = '',
     [int]$RemotePort = 43000,
     [int]$LocalPort = 3000
 )
@@ -7,6 +9,25 @@ $ErrorActionPreference = 'Continue'
 
 $StateDir = Join-Path $env:LOCALAPPDATA 'ChatGPTLocalCoderLauncher'
 $PidFile = Join-Path $StateDir 'ubuntu-relay-ssh.pid'
+$sshTransport = 'tailscale'
+$sshTargetArgs = @()
+
+try {
+    $onHomeLan = -not [string]::IsNullOrWhiteSpace($HomeLanHost) -and -not [string]::IsNullOrWhiteSpace($HomeLanPrefix) -and [bool](@(
+        Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+            Where-Object { $_.IPAddress -like "$HomeLanPrefix*" -and $_.IPAddress -ne $HomeLanHost }
+    ).Count)
+} catch {
+    $onHomeLan = $false
+}
+
+if ($onHomeLan) {
+    & ssh.exe -n -T -o "HostName=$HomeLanHost" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=2 -o ConnectionAttempts=1 $HostAlias "true" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $sshTransport = 'lan'
+        $sshTargetArgs = @('-o', "HostName=$HomeLanHost")
+    }
+}
 $pidValue = $null
 if (Test-Path -LiteralPath $PidFile) {
     $raw = Get-Content -LiteralPath $PidFile -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -28,9 +49,10 @@ if ($pidValue) {
     }
 }
 
-& ssh.exe -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 $HostAlias "curl -fsS --connect-timeout 2 --max-time 4 http://127.0.0.1:$RemotePort/health >/dev/null"
+& ssh.exe -n -T @sshTargetArgs -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 -o ConnectionAttempts=1 $HostAlias "curl -fsS --connect-timeout 2 --max-time 4 http://127.0.0.1:$RemotePort/health >/dev/null"
 $remoteOk = ($LASTEXITCODE -eq 0)
 
+Write-Host ("Preferred path:  " + $(if($sshTransport -eq 'lan'){"LAN -> $HomeLanHost"}else{"Tailscale -> $HostAlias"}))
 Write-Host ("Local MCP:      " + $(if($localOk){'OK'}else{'DOWN'}))
 Write-Host ("Reverse SSH:    " + $(if($sshOk){'ON'}else{'OFF'}) + $(if($pidValue){" (PID $pidValue)"}else{''}))
 Write-Host ("Ubuntu relay:   " + $(if($remoteOk){'OK'}else{'DOWN'}))

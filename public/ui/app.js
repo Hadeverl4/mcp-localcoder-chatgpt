@@ -36,6 +36,8 @@ let activityPaused = false;
 let ownerGuardStatus = null;
 let ownerGuardRefreshTimer = null;
 let ownerGuardCountdownTimer = null;
+let ownerGuardBusy = false;
+let ownerGuardInputsInitialized = false;
 let mcpHealthRefreshTimer = null;
 let mcpHealthInFlight = false;
 
@@ -259,6 +261,12 @@ function formatDuration(ms) {
   return h > 0 ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m ${String(s).padStart(2, "0")}s`;
 }
 
+function lastArmDuration(status) {
+  if (status?.mode !== "armed" || !status.armed_at || !status.expires_at) return null;
+  const duration = Math.round((Date.parse(status.expires_at) - Date.parse(status.armed_at)) / 60000);
+  return Number.isInteger(duration) && duration >= 1 && duration <= 480 ? duration : null;
+}
+
 function renderOwnerGuard() {
   const status = ownerGuardStatus;
   if (!status) return;
@@ -284,28 +292,58 @@ function renderOwnerGuard() {
   document.getElementById("owner-guard-windows").textContent =
     status.workstation_locked == null ? "—" : status.workstation_locked ? "Locked" : "Active";
 
-  if (status.max_idle_minutes) document.getElementById("owner-idle-minutes").value = status.max_idle_minutes;
+  if (!ownerGuardInputsInitialized) {
+    const lastMinutes = lastArmDuration(status);
+    if (lastMinutes) document.getElementById("owner-arm-minutes").value = lastMinutes;
+    if (status.max_idle_minutes) document.getElementById("owner-idle-minutes").value = status.max_idle_minutes;
+    ownerGuardInputsInitialized = true;
+  }
+  const lastMinutes = lastArmDuration(status);
+  const reloadButton = document.getElementById("owner-arm-reload");
+  reloadButton.disabled = ownerGuardBusy || lastMinutes == null;
+  reloadButton.title = lastMinutes == null
+    ? "Chỉ gia hạn khi Owner Guard đã từng được Arm"
+    : `Gia hạn thêm ${lastMinutes} phút tính từ bây giờ`;
   document.querySelectorAll("[data-owner-mode]").forEach((button) => {
     button.classList.toggle("active-mode", button.dataset.ownerMode === configured);
+    button.disabled = ownerGuardBusy;
+  });
+  const selectedDuration = Number(document.getElementById("owner-arm-minutes").value);
+  document.querySelectorAll("[data-owner-duration]").forEach((button) => {
+    button.classList.toggle("selected-duration", Number(button.dataset.ownerDuration) === selectedDuration);
+    button.disabled = ownerGuardBusy;
   });
 }
 
 async function loadOwnerGuard() {
   const data = await api("/api/owner-guard");
-  ownerGuardStatus = data.status;
-  renderOwnerGuard();
+  if (!ownerGuardBusy) {
+    ownerGuardStatus = data.status;
+    renderOwnerGuard();
+  }
 }
 
-async function setOwnerGuard(mode) {
-  const minutes = Number(document.getElementById("owner-arm-minutes").value);
+async function setOwnerGuard(mode, { duration = null, source = "manual" } = {}) {
+  if (ownerGuardBusy) return;
+  const minutes = source === "reload"
+    ? lastArmDuration(ownerGuardStatus)
+    : duration ?? Number(document.getElementById("owner-arm-minutes").value);
   const idleMinutes = Number(document.getElementById("owner-idle-minutes").value);
   if (mode === "armed") {
-    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 480) return toast("TTL phải từ 1–480 phút", true);
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 480) return toast("TTL phải từ 1–480 phút", true);
+  }
+  if (!Number.isInteger(idleMinutes) || idleMinutes < 1 || idleMinutes > 240) return toast("Idle phải từ 1–240 phút", true);
+  // A new elevation still requires confirmation. Renewals and preset changes while already armed are one-click.
+  if (mode === "armed" && (source === "manual" || ownerGuardStatus?.effective_mode !== "armed")) {
     if (!confirm(`ARM Owner Guard trong ${minutes} phút?\n\nTrong thời gian này MCP có thể write file và chạy shell trên Windows.`)) return;
   }
-  if (!Number.isFinite(idleMinutes) || idleMinutes < 1 || idleMinutes > 240) return toast("Idle phải từ 1–240 phút", true);
 
-  const buttons = [...document.querySelectorAll("[data-owner-mode]")];
+  ownerGuardBusy = true;
+  const buttons = [
+    ...document.querySelectorAll("[data-owner-mode]"),
+    ...document.querySelectorAll("[data-owner-duration]"),
+    document.getElementById("owner-arm-reload"),
+  ];
   buttons.forEach((button) => (button.disabled = true));
   try {
     const data = await api("/api/owner-guard", {
@@ -313,12 +351,15 @@ async function setOwnerGuard(mode) {
       body: JSON.stringify({ mode, minutes, idle_minutes: idleMinutes }),
     });
     ownerGuardStatus = data.status;
+    if (mode === "armed") document.getElementById("owner-arm-minutes").value = minutes;
+    if (data.status?.max_idle_minutes) document.getElementById("owner-idle-minutes").value = data.status.max_idle_minutes;
     renderOwnerGuard();
-    toast(mode === "armed" ? `Owner Guard ARMED ${minutes} phút` : `Owner Guard ${mode.toUpperCase()}`);
+    toast(mode === "armed" ? `${source === "reload" ? "Đã gia hạn Arm" : "Owner Guard ARMED"} ${minutes} phút` : `Owner Guard ${mode.toUpperCase()}`);
   } catch (err) {
     toast(err.message, true);
   } finally {
-    buttons.forEach((button) => (button.disabled = false));
+    ownerGuardBusy = false;
+    renderOwnerGuard();
   }
 }
 
@@ -736,6 +777,15 @@ document.getElementById("add-server").addEventListener("click", () => openServer
 document.querySelectorAll("[data-owner-mode]").forEach((button) => {
   button.addEventListener("click", () => setOwnerGuard(button.dataset.ownerMode));
 });
+document.getElementById("owner-arm-reload").addEventListener("click", () => {
+  setOwnerGuard("armed", { source: "reload" });
+});
+document.querySelectorAll("[data-owner-duration]").forEach((button) => {
+  button.addEventListener("click", () => {
+    setOwnerGuard("armed", { duration: Number(button.dataset.ownerDuration), source: "preset" });
+  });
+});
+document.getElementById("owner-arm-minutes").addEventListener("input", () => renderOwnerGuard());
 document.getElementById("save-env").addEventListener("click", async () => {
   const values = {};
   document.querySelectorAll("#env-form input").forEach((el) => (values[el.name] = el.value));

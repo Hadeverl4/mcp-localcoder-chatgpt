@@ -56,7 +56,7 @@ Security properties:
 - Ubuntu relay port is loopback-only.
 - Windows MCP remains loopback-only.
 - Admin UI port 3011 is never forwarded.
-- Reverse SSH is manual; it does not auto-start with Windows.
+- Standalone reverse SSH is manual. An optional Windows bundle launcher may start it as part of one-click startup.
 - Owner Guard remains an independent local authorization layer.
 - The Cloudflare tunnel hostname can remain stable while Windows is offline; requests fail because the origin is unavailable.
 
@@ -101,3 +101,16 @@ Defaults:
 - SSH host alias: `mcp-relay` (override with `-HostAlias <your-ssh-alias>` if needed)
 - Ubuntu loopback relay: 127.0.0.1:43000
 - Windows MCP: 127.0.0.1:3000
+
+For automatic home-LAN-first SSH with a fallback to the configured SSH alias,
+pass your own private LAN host and local subnet prefix as parameters (do not
+commit their values):
+
+```powershell
+.\UBUNTU-LINK-ON.ps1 -HostAlias <your-ssh-alias> -HomeLanHost <your-ubuntu-lan-ip> -HomeLanPrefix <your-home-subnet-prefix>
+```
+
+The startup script uses bounded SSH probes, verifies the remote listening
+port, adopts a healthy matching relay when its saved PID is stale, and waits
+briefly for a stale remote listener to be released. It will not terminate an
+unknown remote process to reclaim a busy relay port.

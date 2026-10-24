@@ -227,11 +227,18 @@ body {
 .owner-mode-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .owner-lock { border-color: #5b2d2d; }
 .owner-readonly { border-color: #5b4e2d; }
+.owner-arm-reload { border-color: #3d5545; color: #b6d9bf; }
+.owner-arm-reload:not(:disabled):hover { border-color: #659874; }
 .owner-mode-actions .btn.active-mode { box-shadow: inset 0 0 0 1px currentColor; background: var(--hover); }
-.owner-mode-actions .btn:disabled { opacity: 0.45; cursor: wait; }
+.owner-mode-actions .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .owner-guard-options { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 .owner-guard-options label { display: flex; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.76rem; }
 .owner-guard-options input { width: 72px; padding: 0.4rem 0.5rem; }
+.owner-arm-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; margin-top: 0.85rem; }
+.owner-arm-presets > span { font-size: 0.76rem; margin-right: 0.3rem; }
+.owner-arm-presets .btn.selected-duration { border-color: #659874; color: #b6d9bf; background: #17251b; }
+.owner-arm-presets .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.owner-arm-hint { margin-top: 0.5rem; font-size: 0.72rem; }
 
 @media (max-width: 980px) {
   .mcp-live-body { align-items: stretch; flex-direction: column; }
