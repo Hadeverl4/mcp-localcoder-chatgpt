@@ -200,6 +200,23 @@ app.get("/health", (_req, res) => {
 });
 
 async function handleMcpPost(req: express.Request, res: express.Response): Promise<void> {
+  // MCP 2026-07-28 server/discover is stateless. Our legacy SDK may internally
+  // initialize a session while handling it, but the discovery response must not
+  // bind the caller to that temporary session before its own initialize call.
+  if ((req.body as { method?: string } | undefined)?.method === "server/discover") {
+    const writeHead = res.writeHead.bind(res);
+    res.writeHead = ((status: number, ...args: any[]) => {
+      res.removeHeader("mcp-session-id");
+      for (const item of args) {
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          for (const key of Object.keys(item)) {
+            if (key.toLowerCase() === "mcp-session-id") delete item[key];
+          }
+        }
+      }
+      return writeHead(status, ...args);
+    }) as typeof res.writeHead;
+  }
   try {
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
     const requestId = extractRequestId(req.body);
